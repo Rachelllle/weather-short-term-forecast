@@ -67,7 +67,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Ingestion Bronze")
     parser.add_argument("--stations", nargs="+", default=["07486"])
     parser.add_argument("--debut", type=int, default=2015)
-    parser.add_argument("--fin", type=int, default=2024)
+    parser.add_argument("--fin", type=int, default=datetime.now().year)
     args = parser.parse_args()
 
     for station in args.stations:
