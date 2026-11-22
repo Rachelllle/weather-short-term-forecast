@@ -42,16 +42,17 @@ def colonne_split(col_date: str) -> F.Column:
 
 
 def lire_silver(spark: SparkSession) -> DataFrame:
-    """Lit le Silver. Les jours partiels sont vidés pour ne pas fausser les variables."""
-    df = spark.read.parquet(DOSSIER_SILVER).withColumn("date", F.to_date("date"))
-    partiel = F.coalesce(F.col("statut_extremes") == "partiel", F.lit(False))
+    df = (
+        spark.read.parquet(DOSSIER_SILVER)
+        .withColumn("date", F.to_date("date"))
+        .withColumnRenamed("station", "ic_id")  
+    )
+    partiel = ~F.col("jour_complet")  
     for colonne in ["tn", "tx", "tm", "rr"]:
         df = df.withColumn(colonne, F.when(partiel, None).otherwise(F.col(colonne)))
     return df.select("ic_id", "date", "tn", "tx", "tm", "rr")
 
-
 def calculer_normale(df: DataFrame) -> DataFrame:
-    """Normale saisonnière : moyenne de tm par station et par jour de l'année (MM-dd), sur l'entraînement."""
     debut, fin = ANNEES_NORMALE
     return (
         df.filter(F.year("date").between(debut, fin))
@@ -74,6 +75,21 @@ def construire_gold(df: DataFrame, normale: DataFrame) -> DataFrame:
     angle = 2 * 3.141592653589793 * F.dayofyear("date") / 365.25
     df = df.withColumn("jour_sin", F.sin(angle)).withColumn("jour_cos", F.cos(angle))
 
+    # Écart à la normale du jour J, amplitude, pluie cumulée sur 3 jours
+    df = (
+        df.withColumn("jour_annee", F.date_format("date", "MM-dd"))
+        .join(normale, ["ic_id", "jour_annee"], "left")
+        .withColumn("ecart_normale", F.col("tm") - F.col("normale_tm"))
+        .drop("jour_annee", "normale_tm")
+        .withColumn("amplitude", F.col("tx") - F.col("tn"))
+        .withColumn(
+            "rr_3j",
+            F.when(
+                F.count("rr").over(par_station.rowsBetween(-2, 0)) == 3,  #on exige les 3j
+                F.sum("rr").over(par_station.rowsBetween(-2, 0)),
+            ),
+        )
+    )
     # 2. Cibles et normale saisonnière de chaque date cible
     for h in HORIZONS:
         df = (
@@ -102,6 +118,7 @@ def construire_gold(df: DataFrame, normale: DataFrame) -> DataFrame:
         + [f"tm_j_moins_{k}" for k in RETARDS_TM]
         + [f"tm_moy_{n}j" for n in FENETRES_TM]
         + ["jour_sin", "jour_cos"]
+        + ["ecart_normale", "amplitude", "rr_3j"]
     )
     cibles = [f"cible_tm_j{h}" for h in HORIZONS]
     references = ["ref_persistance"] + [f"ref_normale_j{h}" for h in HORIZONS]

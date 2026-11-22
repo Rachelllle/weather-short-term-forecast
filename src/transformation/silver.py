@@ -14,7 +14,7 @@ from pyspark.sql import functions as F
 
 N_OBS_MIN = 40                    
 TEMP_MIN, TEMP_MAX = -40.0, 50.0  
-PLUIE_MAX = 400.0                 # mm par jour
+PLUIE_MAX = 400.0                 
 TEMPERATURES = ["tn", "tx", "tm"]
 
 
